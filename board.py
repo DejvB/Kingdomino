@@ -1,5 +1,10 @@
 from copy import deepcopy
 import random
+import numpy as np
+import time
+# start = time.time()
+# end = time.time()
+# print(end - start)
 
 # 26F1W0:
     # 26 - tile number
@@ -44,6 +49,8 @@ class Field(object):
 
 class Board(object):
     def __init__(self, size):
+        self.tiles = []
+        self.selected = []
         self.empty = True
         self.fullness = 0
         self.size = size
@@ -62,6 +69,7 @@ class Board(object):
                 self.full = True
             self.board[left_position[0]][left_position[1]] = tile.left
             self.board[right_position[0]][right_position[1]] = tile.right
+            self.tiles.append(tile.string)
 
     def remove_tile(self, left_position, right_position):
         self.full = False
@@ -71,6 +79,7 @@ class Board(object):
         tile = Tile()
         self.board[left_position[0]][left_position[1]] = tile.left
         self.board[right_position[0]][right_position[1]] = tile.right
+        self.tiles.pop()
 
     def pipe(self, temp_board, i, j, a, b):
 
@@ -103,13 +112,14 @@ class Board(object):
             for j in range(self.size):
                 content = getattr(self.board[i][j],attr)
                 content = content if not content in ['E', 0] else ''
-                row += "{:<3}".format(content) + self.pipe(temp_board, i + 1, j + 1, 0, 1)
+                row += " {:<2}".format(content) + self.pipe(temp_board, i + 1, j + 1, 0, 1)
             # row += '|'
                 row_under += self.pipe(temp_board, i + 1, j + 1, 1, 0)
             table_string += row + '\n'
             table_string += row_under + '\n'
         return table_string
         # print('+' + '-'*self.size*3 + '----+')
+
 
     def all_possible_places(self, tile):
         list = []
@@ -122,37 +132,32 @@ class Board(object):
                 right_match = self.board[i][j].environment == tile.right.environment
                 castle_match = self.board[i][j].environment == 'C'
                 if left_match or right_match or castle_match:
-
-
-
-                    if self.empty:
-                        neigh = [(int((self.size - 1)/2),int((self.size - 3)/2))]
-                    else:
-                        neigh = self.get_neighbours(i,j,'E', visited_board)
-                    # neigh = self.get_neighbours(i, j, 'E', visited_board)  # 2.87  57.33
+                    # if self.empty:
+                    #     neigh = [(int((self.size - 1)/2),int((self.size - 3)/2))]
+                    # else:
+                    #     neigh = self.get_neighbours(i,j,'E', visited_board)
+                    neigh = self.get_neighbours(i, j, 'E', visited_board)  # 2.87  57.33
 
                     while neigh:
                         field = neigh.pop()
                         neigh2 = self.get_neighbours(*field, 'E', visited_board)
                         while neigh2:
                             field2 = neigh2.pop()
+                            if left_match and right_match: #  50.777 62.929 3.419, 50.8095 62.796 3.642
+                                right_match == False
                             if left_match:
                                 neigh3 = int(bool(self.get_neighbours(*field2, tile.right.environment, visited_board)))
-                                list.append((field, field2, neigh3))
+                                castle_1 = int(bool(self.get_neighbours(*field2, 'C', visited_board)))
+                                castle_2 = int(bool(self.get_neighbours(*field, 'C', visited_board)))
+                                list.append((field, field2, neigh3 - castle_1 - castle_2))
                             if right_match: # right match
                                 neigh3 = int(bool(self.get_neighbours(*field2, tile.left.environment, visited_board)))
-                                # if neigh3:
-                                #     print(self.get_neighbours(*field2, tile.right.environment, visited_board))
-                                #     print(tile.left.environment, tile.right.environment)
-                                #     print(field, field2)
-                                #     self.show('all')
-                                list.append((field2, field, neigh3))
+                                castle_1 = int(bool(self.get_neighbours(*field2, 'C', visited_board)))
+                                castle_2 = int(bool(self.get_neighbours(*field, 'C', visited_board)))
+                                list.append((field2, field, neigh3 - castle_1 - castle_2))
                             if not list and castle_match:
+                            # if not left_match and not right_match and castle_match:
                                 list.extend(((field, field2, -1), (field2, field, -1)))
-
-
-
-
         return set(list)
 
     def get_neighbours(self, i, j, env, visited_board):
@@ -182,41 +187,46 @@ class Board(object):
                 queue.extend(self.get_neighbours(*field, env, visited_board))
         # print('size: %d, crowns: %d' %(size, crowns))
         if size%2 == 1 and env == 'E': # can not happen it divide E into two odd parts.
-            return -50
-        return size * crowns
+            return size, -50
+        return size,  crowns
 
     def create_visited_board(self):
         return [[False if 0 < i < self.size + 1 and 0 < j < self.size + 1 else True for i in range(self.size + 2)] for j in range(self.size + 2)]
 
     def score(self):
         points = 0
+        fiefs = []
         visited_board = self.create_visited_board()
         for i in range(self.size):
             for j in range(self.size):
                 if not visited_board[i + 1][j + 1]:
                     visited_board[i + 1][j + 1] = True
-                    points += self.bfs(visited_board, self.board[i][j].environment, i, j)
+                    fief_size, crowns = self.bfs(visited_board, self.board[i][j].environment, i, j)
+                    points += fief_size * crowns
+                    if self.board[i][j].environment != 'E':
+                        fiefs.append(fief_size)
         if self.full:
             points += 5
-        return points
+        return points, sum(fiefs) / len(fiefs)
+
 
     def maximize_score(self, tile):
-        score = -8
+        score = -10
         place = []
         temp_board = deepcopy(self)
         for a, b, good in self.all_possible_places(tile):
             temp_place = (a, b)
             temp_board.add_tile(tile, *temp_place)
-            temp_score = temp_board.score()
-            if temp_score + (4 * good) > score:
-                score = temp_score
+            temp_score, fief_coef = temp_board.score()
+            if temp_score + (2 * good) + fief_coef > score:   #  48.4475 60.434 2.988
+                score = temp_score  + (2 * good) + fief_coef
                 place = temp_place
             temp_board.remove_tile(*temp_place)
 
         return place, score
 
     def play(self, sample):
-        score = -2
+        score = -10
         pos = []
         tile = Tile()
         tile.fill_tile(sample[0])
@@ -245,59 +255,82 @@ class Board(object):
 
 
 
-    # def maximize_score_2(self, tile, previous_tile):
-    #     score = -2
-    #     place = []
-    #     temp_board = deepcopy(self)
-    #     for x, y, bad in self.all_possible_places(previous_tile):  #
-    #         previous_place = (x, y)
-    #         temp_board.add_tile(previous_tile, *previous_place)  #
-    #         for a, b, good in self.all_possible_places(tile):
-    #             temp_place = (a, b)
-    #             temp_board.add_tile(tile, *temp_place)
-    #             temp_score = temp_board.score()
-    #             if temp_score > score or (temp_score - score >= -2 and good == 1):
-    #                 temp_score += good * 2
-    #                 score = temp_score
-    #                 place = previous_place
-    #             # temp_board.add_tile(Tile(), *temp_place)  # works as remove tile
-    #             temp_board.remove_tile(*temp_place)
-    #         temp_board.remove_tile(*previous_place)  #
-    #     return place, score
-    #
-    # def play_2(self, sample, previous_sample=''):
-    #     score = 0
-    #     pos = []
-    #     tile = Tile()
-    #     tile.fill_tile(sample[0])
-    #     num = 0
-    #     previous_tile = Tile()
-    #     if previous_sample:
-    #         previous_tile.fill_tile(previous_sample)
-    #     else:
-    #         previous_tile.fill_tile(sample[0])
-    #     for s in sample:
-    #         temp_tile = Tile()
-    #         temp_tile.fill_tile(s)
-    #         temp_pos, temp_score = self.maximize_score_2(temp_tile, previous_tile)
-    #         # temp_score += 3 - num
-    #         # num += 1
-    #         # print(temp_score, temp_tile.left.tile)
-    #         if temp_score > score:
-    #             score = temp_score
-    #             pos = temp_pos
-    #             tile = temp_tile
-    #     self.add_tile(previous_tile, *pos)
-    #     return tile, pos
+    def maximize_score_2(self, tile, previous_tile, score):
+        # score = -10
+        place = []
+        previous_place = []
+        temp_board = deepcopy(self)
+        previous_possible = False
+        current_possible = False
+        for x, y, bad in self.all_possible_places(previous_tile):
+            previous_possible = True
+            temp_previous_place = (x, y)
+            temp_board.add_tile(previous_tile, *temp_previous_place)
+            for a, b, good in temp_board.all_possible_places(tile):
+                current_possible = True
+                temp_place = (a, b)
+                temp_board.add_tile(tile, *temp_place)
+                temp_score, fief_coef = temp_board.score()
+                if temp_score + (2 * good) + (2 * bad) + fief_coef > score:
+                    score = temp_score + (2 * good) + (2 * bad) + fief_coef
+                    place = temp_place
+                    previous_place = temp_previous_place
+                # if previous_tile.string == '47S0M2':
+                #     print('Chosen: ', previous_tile.string, previous_place, tile.string, place, score)
+                #     print('Temp: ', previous_tile.string, temp_previous_place, tile.string, temp_place, temp_score + (2 * good) + fief_coef)
+                #     temp_board.show('all')
+                temp_board.remove_tile(*temp_place)
+            temp_board.remove_tile(*temp_previous_place)
+        if current_possible:
+            return previous_place, place, score
+        elif previous_possible:
+            place, score = self.maximize_score(previous_tile)
+            return place, [], score
+        elif temp_board.all_possible_places(tile):
+            place, score = self.maximize_score(tile)
+            return [], place, score
+        else:
+            return [], [], score
+
+    def play_2(self, sample, previous_sample=''):
+        score = -10
+        pos = []
+        previous_pos = []
+        tile = Tile()
+        tile.fill_tile(sample[0])
+        previous_tile = Tile()
+        if previous_sample:
+            previous_tile.fill_tile(previous_sample)
+            for s in sample:
+                temp_tile = Tile()
+                temp_tile.fill_tile(s)
+                # if tile.string == '07L0L0': # 03F0F0
+                #     print(tile.string, pos, previous_tile.string, previous_pos)
+                temp_previous_pos, temp_pos, temp_score = self.maximize_score_2(temp_tile, previous_tile, score)
+                if temp_score > score:
+                    score = temp_score
+                    pos = temp_pos
+                    previous_pos = temp_previous_pos
+                    tile = temp_tile
+            if previous_sample:
+                self.add_tile(previous_tile, *previous_pos)
+            return tile, previous_pos, pos
+        else:
+            for s in sample:
+                temp_tile = Tile()
+                temp_tile.fill_tile(s)
+                temp_pos, temp_score = self.maximize_score(temp_tile)
+                if temp_score > score:
+                    score = temp_score
+                    pos = temp_pos
+                    tile = temp_tile
+            return tile, pos, pos
 
 def split_and_merge(*args):
     table = []
     for i in range(len(args)):
-        # print(args[i].split('\n'))
         table.append(args[i].split('\n'))
-    # print(table)
     for elem in list(map(list, zip(*table))):
-        # print(elem, sep='E')
         for el in elem:
             print(el, sep='E', end ="   ")
         print()
@@ -314,6 +347,147 @@ def get_test(filename, game, round):
     sample = [sam for sam in f.readlines()[12 * game + round].split()]
     return sample
 
+def stats(boards):
+    max_points = 0
+    sum_points = 0
+    filled = 0
+    for board in boards:
+        points, _ = board.score()
+        max_points = points if points > max_points else max_points
+        sum_points += points
+        filled = filled + 1 if board.full else filled
+    return [sum_points, max_points, filled]
+
+
+
+def start_game(game, players=4, results=False):
+    if players == 2:
+        b1 = Board(7)
+        b2 = Board(7)
+        order = random.shuffle([b1, b2, b1, b2])
+    elif players == 4: # what about three players?
+        b1 = Board(5)
+        b2 = Board(5)
+        b3 = Board(5)
+        b4 = Board(5)
+        order = [b1, b2, b3, b4]
+    ind_current = [0, 1, 2, 3]
+    ind_next = [0, 1, 2, 3]
+    for round in range(12):
+        sample = get_test('games', game, round)
+        sample.sort()
+        temp_sample = deepcopy(sample)
+        for i in range(4):
+            print('round: ' + str(round) + '  player: ' + str(ind_current[i]))  ###
+            if ind_current[i] == 5:
+                tile, pos = order[ind_current[i]].real_player(temp_sample)
+            else:
+                tile, pos = order[ind_current[i]].play(temp_sample)
+            print('Selected: ', tile.string)  ###
+            ind = sample.index(tile.string)
+            temp_sample.pop(temp_sample.index(tile.string))
+            ind_next[ind] = ind_current[i]
+            # if ind_current[i] == 3:
+            #     b4.show('all')
+        ind_current = deepcopy(ind_next)
+    # for b in order:
+        # if b.score()[0] < 25: # 47, 86
+        #     print(game)
+    if results:
+        for b in order:
+            print(b.score()[0], end='\n')
+            split_and_merge(b.show('tile'), b.show('environment'), b.show('crown'))
+    return stats(order)
+
+def update_tile_stats(board):
+    for tile in board.tiles:
+        tile_stats[tile] += board.score()[0]
+
+
+def start_game_2(game, players=4, results=False):
+    if players == 2:
+        b1 = Board(7)
+        b2 = Board(7)
+        order = random.shuffle([b1, b2, b1, b2])
+        order = [b1, b2, b2, b1]
+    elif players == 4: # what about three players?
+        b1 = Board(5)
+        b2 = Board(5)
+        b3 = Board(5)
+        b4 = Board(5)
+        order = [b1, b2, b3, b4]
+    ind_current = [0, 1, 2, 3]
+    ind_previous = [0, 1, 2, 3]
+    ind_next = [0, 1, 2, 3]
+    sample = []
+    for round in range(12):
+        if sample:
+            previous_sample = deepcopy(sample)
+        else:
+            previous_sample = ['', '', '', '']
+        sample = get_test('games', game, round)
+        sample.sort()
+        temp_sample = deepcopy(sample)
+        # print(sample)
+        for i in range(4):
+            # print('round: ' + str(round) + '  player: ' + str(ind_current[i]))  ###
+            # print(sample)  ###
+            # print(temp_sample)  ###
+            # order[ind_current[i]].show('all')  ###
+            if ind_current[i] == 1:
+                # tile, previous_pos = order[ind_current[i]].real_player(temp_sample)
+                tile, previous_pos, pos = order[ind_current[i]].play_2(temp_sample, previous_sample[i])
+            else:
+                # print(previous_sample, ind_previous, ind_current, i)
+                tile, pos = order[ind_current[i]].play(temp_sample)
+                # tile, previous_pos, pos = order[ind_current[i]].play_2(temp_sample, previous_sample[i])
+            order[ind_current[i]].selected.append(tile.string)
+            # print('Selected: ', tile.string)  ###
+            if round == 11:
+                # print(tile.string, previous_pos, pos)
+                order[ind_current[i]].add_tile(tile, *pos)
+            ind = sample.index(tile.string)
+            temp_sample.pop(temp_sample.index(tile.string))
+            ind_next[ind] = ind_current[i]
+        ind_previous = deepcopy(ind_current)
+        ind_current = deepcopy(ind_next)
+    # for b in order:
+        # if b.score()[0] < 250:
+            # print(game)
+            # print(b.selected)
+            # print(b.tiles)
+            # b.show('all')
+    for b in order:
+        # update_tile_stats(b)
+        if b.score()[0] < 25:
+            print(game)
+            print(b.tiles)
+            b.score()[0]
+            b.show('all')
+    if results:
+        for b in order:
+            # print(sample, ind_previous)
+            print(b.score()[0], end='\n')
+            split_and_merge(b.show('tile'), b.show('environment'), b.show('crown'))
+            print(b.tiles)
+    return stats(order)
+
+
+def test(games, shift, players):
+    start = time.time()
+    stats = []
+    if games <= 10:
+        for game in range(games):
+            stats.append(start_game_2(game + shift, players, True))   # start_game
+    else:
+        for game in range(games):
+            if game%10 == 0:
+                print(game)
+            stats.append(start_game_2(game + shift, players, False))  # start_game_2
+    stats = np.array(stats)
+    print(sum(stats[:,0])/games/players, sum(stats[:,1])/games, sum(stats[:,2])/games)
+    end = time.time()
+    print('Total time is: ', end - start)
 
 ## thousand games generation ##
 # for _ in range(1000):
@@ -324,85 +498,9 @@ def get_test(filename, game, round):
 #             sample.append(all.pop())
 #         write_test('games',sample)
 
+# tile_stats = {i : 0 for i in tiles}
+test(1,356,4)
+# for t in tiles:
+#     print(t, tile_stats[t] / 100)
 
 
-#
-# for i in range(12):
-#     ha = get_test('games', 1, i)
-#     print(ha)
-# b1 = Board(5)
-# tile, pos = b1.real_player(samples[0])
-# print(tile, pos)
-
-import time
-# start = time.time()
-# print("hello")
-# end = time.time()
-# print(end - start)
-
-total_score = 0
-total_full = 0
-games = 100
-m = 0
-start = time.time()
-for game in range(games):
-    # all = random.sample(tiles, 48)
-    b1 = Board(5)
-    b2 = Board(5)
-    b3 = Board(5)
-    b4 = Board(5)
-    order = [b1, b2, b3, b4]
-    ind_current = [0, 1, 2, 3]
-    ind_next = [0, 1, 2, 3]
-    if game%10 == 0:
-        print(game)
-    sample = []
-    for round in range(12):
-        sample = get_test('games', game, round)
-        if games == 0:
-            split_and_merge(b1.show('tile'), b1.show('environment'), b1.show('crown'))
-        # sample = []
-        # for _ in range(4):
-        #     sample.append(all.pop())
-
-        sample.sort()
-        temp_sample = deepcopy(sample)
-        # write_test('games', sample)
-        for i in range(4):
-            # if ind_current[i] == 3:
-            #     print(i + 1)
-            #     print(temp_sample)
-            #     split_and_merge(order[ind_current[i]].show('tile'), order[ind_current[i]].show('environment'),
-            #                 order[ind_current[i]].show('crown'))
-            if ind_current[i] == 5:
-                tile, pos = order[ind_current[i]].real_player(temp_sample)
-            else:
-                tile, pos = order[ind_current[i]].play(temp_sample)
-            # print(tile.string)
-            # split_and_merge(order[ind_current[i]].show('tile'), order[ind_current[i]].show('environment'), order[ind_current[i]].show('crown'))
-            ind = sample.index(tile.string)
-            temp_sample.pop(temp_sample.index(tile.string))
-            ind_next[ind] = ind_current[i]
-        ind_current = deepcopy(ind_next)
-    total_score += max(b1.score(), b2.score(), b3.score(), b4.score()) * 4
-    # total_score += sum((b1.score(), b2.score(), b3.score(), b4.score()))
-    # for b in order:
-        # if 25 > b.score():
-        #     print(game)
-        #     m = b.score()
-        #     print(m)
-    # split_and_merge(b1.show('tile'), b1.show('environment'), b1.show('crown'))
-    total_full += sum((int(b1.full), int(b2.full), int(b3.full), int(b4.full)))
-if games == 1:
-    for b in order:
-        print(b.score(), end = '\n')
-        split_and_merge(b.show('tile'), b.show('environment'), b.show('crown'))
-print(total_full/games)
-print(total_score/games/4)
-# b.show('tile')
-# b.show('environment')
-# b.show('crown')
-# print(b.score())
-
-end = time.time()
-print(end - start)
